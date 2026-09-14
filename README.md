@@ -10,19 +10,46 @@ Nothing in this repository registers or bundles a skill. `sample-carlog/` is a p
 |---|---|
 | **JDK** | 17 or later on `PATH` (the build targets a Java 21 toolchain and will provision one if needed) |
 | **Codex CLI** | `codex --version`. If you installed the ChatGPT desktop app, the binary ships inside it at `/Applications/ChatGPT.app/Contents/Resources/codex` and is *not* on `PATH` — symlink it: `ln -s /Applications/ChatGPT.app/Contents/Resources/codex /opt/homebrew/bin/codex` |
-| **Node** | for `npx` (`brew install node`) |
+| **Node** | only for install Route B (`brew install node`) |
 | **Network** | required at run time — see [Why network access is mandatory](#why-network-access-is-mandatory) |
 
 ## 1. Install the skill
+
+Pick **one** of the two routes below. They install to different directories, and Codex reads both — do both and you get two skills with the identical name `gradle-best-practices`, with no way to say which you meant.
+
+### Route A — just ask Codex
+
+```text
+Install gradle-best-practices and gradle-cli from https://github.com/gradle/gradle-skills
+```
+
+No tooling, no flags, no need to know that the skills live under `skills/` in that repo. Codex ships a bundled system skill, `skill-installer`, whose description covers *"install a skill from another repo (including private repos)"*, so a request phrased like this routes to it automatically.
+
+It works out the layout itself — it queries the GitHub tree API to locate the named skills — and then runs its own helper, both skills in one call:
+
+```bash
+python3 scripts/install-skill-from-github.py --repo gradle/gradle-skills \
+  --path skills/gradle-best-practices --path skills/gradle-cli
+```
+
+Things worth knowing about this route:
+
+- **It installs to `$CODEX_HOME/skills/<name>`** — `~/.codex/skills/` unless you have overridden `CODEX_HOME`. That is Codex-only; it does not reach other agents.
+- **It needs network.** Interactively, approve the escalation it asks for. Non-interactively you need `-c sandbox_workspace_write.network_access=true`, plus `--add-dir ~/.codex` so it can write outside the workspace.
+- **It refuses to overwrite.** The helper aborts if the destination directory already exists, so it is safe to re-run but it will *not* update an existing install. To upgrade, delete the directory first.
+- **It pins to `main` by default.** The helper takes `--ref` for a tag or commit; ask for a specific version if you need reproducibility.
+- **The skill is live on the next turn**, not the current one.
+
+### Route B — `npx skills add`
 
 ```bash
 npx skills add gradle/gradle-skills --skill gradle-best-practices
 ```
 
-This installs to `~/.agents/skills/gradle-best-practices/`, the vendor-neutral skill directory that Codex reads. One copy serves every agent that honours the convention.
+Installs to `~/.agents/skills/gradle-best-practices/`, the vendor-neutral directory. One copy serves Codex *and* every other agent that honours the convention — the better choice if you use more than one. Drop `--skill` to install both skills. Requires Node (`brew install node`).
 
 <details>
-<summary>Alternative: install without <code>npx</code></summary>
+<summary>Fallback: plain <code>git clone</code></summary>
 
 ```bash
 git clone --depth 1 https://github.com/gradle/gradle-skills /tmp/gradle-skills
@@ -30,7 +57,7 @@ mkdir -p ~/.codex/skills
 cp -R /tmp/gradle-skills/skills/gradle-best-practices ~/.codex/skills/
 ```
 
-Codex reads both `~/.agents/skills/` and `$CODEX_HOME/skills/` (default `~/.codex/skills/`). Use one or the other — installing to both makes two skills with the identical name `gradle-best-practices` visible at once, with no way to tell Codex which you meant.
+Same destination as Route A, without the agent round-trip. Use it when you want a specific ref, or to update an install that Route A refuses to overwrite.
 </details>
 
 ### Confirm Codex sees it
@@ -164,7 +191,13 @@ There is no tool-call name to match on, which matters if you are porting a skill
 
 ## Troubleshooting
 
-**Two skills with the same name.** `npx skills add` writes to `~/.agents/skills/`; a manual copy may sit in `~/.codex/skills/`. Codex reads both and will list `gradle-best-practices` twice with different descriptions. Delete one.
+**Two skills with the same name.** Route A writes to `~/.codex/skills/`, Route B to `~/.agents/skills/`. Codex reads both and will list `gradle-best-practices` twice, with different descriptions if the two copies are different versions. Delete whichever you do not want:
+
+```bash
+ls -d ~/.codex/skills/gradle-* ~/.agents/skills/gradle-* 2>/dev/null
+```
+
+**A skill you just installed is not being used.** It becomes available on the *next* turn. In `codex exec`, that means the next invocation — installing and using a skill in one non-interactive run does not work.
 
 **The skill loads but reports nothing.** Almost always network: it fetched no catalog. Confirm `sandbox_workspace_write.network_access=true` is set.
 
