@@ -49,6 +49,7 @@ cd sample-carlog
 
 codex exec \
   --sandbox workspace-write \
+  --add-dir ~/.gradle \
   -c sandbox_workspace_write.network_access=true \
   -c shell_environment_policy.inherit=all \
   "This Gradle build is valid, but it probably has issues with things not done
@@ -69,8 +70,23 @@ Expect roughly 15–25 shell commands and a few minutes. Drop `exec` and the pro
 | Flag | Why |
 |---|---|
 | `--sandbox workspace-write` | The skill's job is to *apply* fixes. Read-only produces a report and no edits. |
+| `--add-dir ~/.gradle` | **Mandatory.** See below. |
 | `-c sandbox_workspace_write.network_access=true` | **Mandatory.** See below. |
 | `-c shell_environment_policy.inherit=all` | Passes `JAVA_HOME`/`PATH` through to the sandboxed shell so `./gradlew` finds a JDK. |
+
+### Why `--add-dir ~/.gradle` is mandatory
+
+`workspace-write` grants write access to the workspace and nothing else. The Gradle user home sits outside it, so without this flag the wrapper cannot even take its own lock before unpacking the distribution:
+
+```
+java.io.FileNotFoundException: ~/.gradle/wrapper/dists/gradle-9.5.0-bin/…/gradle-9.5.0-bin.zip.lck
+  (Operation not permitted)
+        at org.gradle.wrapper.Install.createDist
+```
+
+Every `./gradlew` invocation fails this way, so the agent cannot verify its own changes. Verified on this project: with the flag, `BUILD SUCCESSFUL`; without it, the error above.
+
+Pointing `GRADLE_USER_HOME` inside the workspace instead is *not* a workaround — it keeps the run hermetic but forces a full distribution download on every fresh clone, and the daemon still wants a writable real home.
 
 ### Why network access is mandatory
 
@@ -78,15 +94,16 @@ The official `gradle-best-practices` skill ships **no embedded catalog**. Its SK
 
 The first `./gradlew` invocation also downloads the Gradle 9.5.0 distribution unless it is already in `~/.gradle/wrapper/dists/`.
 
-<details>
-<summary>Reusing an existing Gradle cache</summary>
+### A representative run
 
-`~/.gradle` sits outside the workspace, so the sandbox blocks writes to it and Gradle re-downloads everything into the project. To reuse your real cache:
+For calibration, one run of exactly the command above (`gpt-5.6-terra`, Codex CLI 0.154.0, 13 shell commands, ~740K input tokens of which ~660K cached, 7K output):
 
-```bash
-codex exec --sandbox workspace-write --add-dir ~/.gradle ... 
-```
-</details>
+- Fetched seven `best_practices_*.html` pages from `docs.gradle.org` — the live catalog, working as designed.
+- Applied: wrapper upgrade to 9.7.1 with `distributionSha256Sum`, `rootProject.name`, repositories centralised in settings with `FAIL_ON_PROJECT_REPOS`, a version catalog, UTF-8 encoding, lazy provider wiring with path sensitivity, `dependsOn` removal.
+- Declined: Kotlin DSL conversion, convention plugins, and moving root sources into a subproject — reported explicitly as "larger structural recommendations" left alone.
+- `./gradlew build` passed, 32 tests, all five source files untouched.
+
+Where it draws the line between "apply" and "recommend" moves with the prompt. Asking it to re-examine before concluding, and not to stop while any identified issue is unaddressed, pushes it into the structural fixes as well.
 
 ## 3. Check the result
 
@@ -152,6 +169,18 @@ There is no tool-call name to match on, which matters if you are porting a skill
 **The skill loads but reports nothing.** Almost always network: it fetched no catalog. Confirm `sandbox_workspace_write.network_access=true` is set.
 
 **`./gradlew` fails with no JDK.** The sandboxed shell did not inherit your environment. Add `-c shell_environment_policy.inherit=all`, or set `org.gradle.java.home` in `gradle.properties`.
+
+**`Operation not permitted` on a file under `~/.gradle`.** The Gradle user home is not writable from the sandbox. Add `--add-dir ~/.gradle`.
+
+**Checking sandbox behaviour without burning a model run.** `codex sandbox` runs a single command under the same seatbelt policy — useful for proving a build works before you let an agent loose on it. Note it defaults to **read-only** regardless of your `config.toml`, so set the mode explicitly or every write silently fails:
+
+```bash
+codex sandbox -c sandbox_mode="workspace-write" \
+  -c 'sandbox_workspace_write.writable_roots=["'$HOME'/.gradle"]' \
+  -c sandbox_workspace_write.network_access=true \
+  -c shell_environment_policy.inherit=all \
+  ./gradlew build
+```
 
 **Isolating a run from your installed skills.** To test one skill with nothing else visible, point Codex at a throwaway home:
 
