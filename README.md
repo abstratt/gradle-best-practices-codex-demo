@@ -22,13 +22,19 @@ npx skills add gradle/gradle-skills --skill gradle-best-practices -y
 
 Installs to `./.agents/skills/gradle-best-practices/`, inside this checkout (gitignored) rather than your home directory. `-g` installs to `~/.agents/skills/` instead; drop `--skill` to install both skills. Codex walks up from its working directory, so the skill is still found when you run the demo from `sample-carlog/`.
 
-**Route 2 — just ask Codex.** No tooling, no flags:
+**Route 2 — just ask Codex, project-local.** No tooling or flags:
 
 ```text
-Install gradle-best-practices from https://github.com/gradle/gradle-skills/skills
+Install the official Gradle skills `gradle-best-practices` and `gradle-cli` from
+https://github.com/gradle/gradle-skills/skills for this project only. Put them
+under `./.agents/skills/` and do not install them under `~/.codex/skills/`.
 ```
 
-Codex's bundled `skill-installer` skill picks this up, works out the repo layout itself, and installs both skills in one call. It is **machine-wide** — it writes to `~/.codex/skills/`, so the skill appears in every project — it costs model tokens, it refuses to overwrite an existing install, and the skill only goes live on the *next* turn.
+Codex's bundled `skill-installer` skill picks this up, uses the project-local
+`.agents/skills/` destination, and installs both skills in one call. This keeps
+the skills scoped to this checkout rather than making them available in every
+project. It costs model tokens, refuses to overwrite an existing install, and
+the skills only go live on the *next* turn.
 
 Confirm either way, for free:
 
