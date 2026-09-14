@@ -1,6 +1,6 @@
 # Gradle Best Practices with Codex
 
-A self-contained demo: run the official [`gradle-best-practices`](https://github.com/gradle/gradle-skills) skill against a small Gradle build that deliberately violates a cluster of documented best practices, using [Codex](https://developers.openai.com/codex/).
+A self-contained demo: run the official [`gradle-best-practices`](https://github.com/gradle/gradle-skills/skills) skill against a small Gradle build that deliberately violates a cluster of documented best practices, using [Codex](https://developers.openai.com/codex/).
 
 Nothing here bundles a skill. `sample-carlog/` is a plain Gradle project; you install the skill separately, from the official Gradle skills repository.
 
@@ -25,7 +25,7 @@ Installs to `./.agents/skills/gradle-best-practices/`, inside this checkout (git
 **Route 2 — just ask Codex.** No tooling, no flags:
 
 ```text
-Install gradle-best-practices and gradle-cli from https://github.com/gradle/gradle-skills
+Install gradle-best-practices from https://github.com/gradle/gradle-skills/skills
 ```
 
 Codex's bundled `skill-installer` skill picks this up, works out the repo layout itself, and installs both skills in one call. It is **machine-wide** — it writes to `~/.codex/skills/`, so the skill appears in every project — it costs model tokens, it refuses to overwrite an existing install, and the skill only goes live on the *next* turn.
