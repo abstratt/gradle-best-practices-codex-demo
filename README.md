@@ -2,72 +2,41 @@
 
 A self-contained demo: run the official [`gradle-best-practices`](https://github.com/gradle/gradle-skills) skill against a small Gradle build that deliberately violates a cluster of documented best practices, using [Codex](https://developers.openai.com/codex/).
 
-Nothing in this repository registers or bundles a skill. `sample-carlog/` is a plain Gradle project. You install the skill separately, from the official Gradle skills repository, and Codex picks it up from your user-level skill directory.
+Nothing here bundles a skill. `sample-carlog/` is a plain Gradle project; you install the skill separately, from the official Gradle skills repository.
 
-## Prerequisites
+**Prerequisites:** JDK 17+ on `PATH`, the `codex` CLI, Node for Route 1 (`brew install node`), and network access at run time. If you installed the ChatGPT desktop app, the Codex binary ships inside it and is *not* on `PATH` — symlink it:
 
-| | |
-|---|---|
-| **JDK** | 17 or later on `PATH` (the build targets a Java 21 toolchain and will provision one if needed) |
-| **Codex CLI** | `codex --version`. If you installed the ChatGPT desktop app, the binary ships inside it at `/Applications/ChatGPT.app/Contents/Resources/codex` and is *not* on `PATH` — symlink it: `ln -s /Applications/ChatGPT.app/Contents/Resources/codex /opt/homebrew/bin/codex` |
-| **Node** | only for install Route B (`brew install node`) |
-| **Network** | required at run time — see [Why network access is mandatory](#why-network-access-is-mandatory) |
+```bash
+ln -s /Applications/ChatGPT.app/Contents/Resources/codex /opt/homebrew/bin/codex
+```
 
 ## 1. Install the skill
 
-Pick **one** of the two routes below. They install to different directories, and Codex reads both — do both and you get two skills with the identical name `gradle-best-practices`, with no way to say which you meant.
+Pick **one** route. Codex reads both locations at once, so doing both gives you two skills with the same name and no way to say which you meant.
 
-### Route A — just ask Codex
+**Route 1 — `npx skills add`, project-local.** Run from the repository root:
+
+```bash
+npx skills add gradle/gradle-skills --skill gradle-best-practices -y
+```
+
+Installs to `./.agents/skills/gradle-best-practices/`, inside this checkout (gitignored) rather than your home directory. `-g` installs to `~/.agents/skills/` instead; drop `--skill` to install both skills. Codex walks up from its working directory, so the skill is still found when you run the demo from `sample-carlog/`.
+
+**Route 2 — just ask Codex.** No tooling, no flags:
 
 ```text
 Install gradle-best-practices and gradle-cli from https://github.com/gradle/gradle-skills
 ```
 
-No tooling, no flags, no need to know that the skills live under `skills/` in that repo. Codex ships a bundled system skill, `skill-installer`, whose description covers *"install a skill from another repo (including private repos)"*, so a request phrased like this routes to it automatically.
+Codex's bundled `skill-installer` skill picks this up, works out the repo layout itself, and installs both skills in one call. It is **machine-wide** — it writes to `~/.codex/skills/`, so the skill appears in every project — it costs model tokens, it refuses to overwrite an existing install, and the skill only goes live on the *next* turn.
 
-It works out the layout itself — it queries the GitHub tree API to locate the named skills — and then runs its own helper, both skills in one call:
-
-```bash
-python3 scripts/install-skill-from-github.py --repo gradle/gradle-skills \
-  --path skills/gradle-best-practices --path skills/gradle-cli
-```
-
-Things worth knowing about this route:
-
-- **It installs to `$CODEX_HOME/skills/<name>`** — `~/.codex/skills/` unless you have overridden `CODEX_HOME`. That is Codex-only; it does not reach other agents.
-- **It needs network.** Interactively, approve the escalation it asks for. Non-interactively you need `-c sandbox_workspace_write.network_access=true`, plus `--add-dir ~/.codex` so it can write outside the workspace.
-- **It refuses to overwrite.** The helper aborts if the destination directory already exists, so it is safe to re-run but it will *not* update an existing install. To upgrade, delete the directory first.
-- **It pins to `main` by default.** The helper takes `--ref` for a tag or commit; ask for a specific version if you need reproducibility.
-- **The skill is live on the next turn**, not the current one.
-
-### Route B — `npx skills add`
+Confirm either way, for free:
 
 ```bash
-npx skills add gradle/gradle-skills --skill gradle-best-practices
+codex debug prompt-input "hi" | grep -o 'gradle-best-practices[^"]\{0,80\}'
 ```
 
-Installs to `~/.agents/skills/gradle-best-practices/`, the vendor-neutral directory. One copy serves Codex *and* every other agent that honours the convention — the better choice if you use more than one. Drop `--skill` to install both skills. Requires Node (`brew install node`).
-
-<details>
-<summary>Fallback: plain <code>git clone</code></summary>
-
-```bash
-git clone --depth 1 https://github.com/gradle/gradle-skills /tmp/gradle-skills
-mkdir -p ~/.codex/skills
-cp -R /tmp/gradle-skills/skills/gradle-best-practices ~/.codex/skills/
-```
-
-Same destination as Route A, without the agent round-trip. Use it when you want a specific ref, or to update an install that Route A refuses to overwrite.
-</details>
-
-### Confirm Codex sees it
-
-```bash
-codex exec --sandbox read-only \
-  "List every skill available to you with its exact name. Do nothing else."
-```
-
-`gradle-best-practices` should appear in the list. If it does not, the install landed somewhere Codex does not scan.
+That renders the prompt Codex *would* send, with no model call. Run it from the directory you intend to run the demo from.
 
 ## 2. Run it against the sample project
 
@@ -88,49 +57,15 @@ codex exec \
    renaming one is fine."
 ```
 
-Run it from inside `sample-carlog/`, not from the repository root, so the agent's workspace is the Gradle project alone and it does not read this README's [findings list](#what-it-should-find) as a hint.
-
-Expect roughly 15–25 shell commands and a few minutes. Drop `exec` and the prompt to drive it interactively instead.
-
-### What the flags are for
+Run it from inside `sample-carlog/`, not the repository root, so the agent's workspace is the Gradle project alone and it does not read this README's findings list as a hint. Expect roughly 15–25 shell commands and a few minutes. Drop `exec` and the prompt to drive it interactively instead.
 
 | Flag | Why |
 |---|---|
 | `--sandbox workspace-write` | The skill's job is to *apply* fixes. Read-only produces a report and no edits. |
-| `--add-dir ~/.gradle` | **Mandatory.** See below. |
-| `-c sandbox_workspace_write.network_access=true` | **Mandatory.** See below. |
-| `-c shell_environment_policy.inherit=all` | Passes `JAVA_HOME`/`PATH` through to the sandboxed shell so `./gradlew` finds a JDK. |
-
-### Why `--add-dir ~/.gradle` is mandatory
-
-`workspace-write` grants write access to the workspace and nothing else. The Gradle user home sits outside it, so without this flag the wrapper cannot even take its own lock before unpacking the distribution:
-
-```
-java.io.FileNotFoundException: ~/.gradle/wrapper/dists/gradle-9.5.0-bin/…/gradle-9.5.0-bin.zip.lck
-  (Operation not permitted)
-        at org.gradle.wrapper.Install.createDist
-```
-
-Every `./gradlew` invocation fails this way, so the agent cannot verify its own changes. Verified on this project: with the flag, `BUILD SUCCESSFUL`; without it, the error above.
-
-Pointing `GRADLE_USER_HOME` inside the workspace instead is *not* a workaround — it keeps the run hermetic but forces a full distribution download on every fresh clone, and the daemon still wants a writable real home.
-
-### Why network access is mandatory
-
-The official `gradle-best-practices` skill ships **no embedded catalog**. Its SKILL.md fetches the best-practices pages from `docs.gradle.org` on every run, so the guidance is always current. Codex's `workspace-write` sandbox denies network by default, and without the override the skill loads but cannot reach its own source of truth.
-
-The first `./gradlew` invocation also downloads the Gradle 9.5.0 distribution unless it is already in `~/.gradle/wrapper/dists/`.
-
-### A representative run
-
-For calibration, one run of exactly the command above (`gpt-5.6-terra`, Codex CLI 0.154.0, 13 shell commands, ~740K input tokens of which ~660K cached, 7K output):
-
-- Fetched seven `best_practices_*.html` pages from `docs.gradle.org` — the live catalog, working as designed.
-- Applied: wrapper upgrade to 9.7.1 with `distributionSha256Sum`, `rootProject.name`, repositories centralised in settings with `FAIL_ON_PROJECT_REPOS`, a version catalog, UTF-8 encoding, lazy provider wiring with path sensitivity, `dependsOn` removal.
-- Declined: Kotlin DSL conversion, convention plugins, and moving root sources into a subproject — reported explicitly as "larger structural recommendations" left alone.
-- `./gradlew build` passed, 32 tests, all five source files untouched.
-
-Where it draws the line between "apply" and "recommend" moves with the prompt. Asking it to re-examine before concluding, and not to stop while any identified issue is unaddressed, pushes it into the structural fixes as well.
+| `--add-dir ~/.gradle` | **Mandatory** — the wrapper cannot take its own lock without it. |
+| `-c sandbox_workspace_write.network_access=true` | **Mandatory** — the skill fetches its catalog from `docs.gradle.org` on every run. |
+| `-c shell_environment_policy.inherit=all` | Passes `JAVA_HOME`/`PATH` through so `./gradlew` finds a JDK. |
+| `-m gpt-5.6-luna` | Optional. The cheap model, worth setting on a tight quota. |
 
 ## 3. Check the result
 
@@ -168,62 +103,9 @@ The custom tasks are deliberately configuration-cache compatible and `gradle.pro
 **Watch the lazy-configuration fix specifically.** Removing the literal `.get()` is not the same as making the wiring lazy — a provider handed to a sink that resolves it eagerly still drops a later reconfiguration. The check that matters is behavioural: reconfigure `carLog.logFileName` after evaluation and see whether the task honours the new value.
 </details>
 
-## How Codex loads a skill
+## Notes
 
-Worth knowing when you are debugging a run that ignored the skill, or building tooling around one.
-
-Codex has **no dedicated skill tool**. Skill names and descriptions reach the model in its preamble; "loading" a skill is the model choosing to read the file with an ordinary shell command. A run that used the skill looks like this in `--json` output:
-
-```
-command_execution  /bin/zsh -lc "sed -n '1,240p' ~/.agents/skills/gradle-best-practices/SKILL.md"
-command_execution  /bin/zsh -lc "sed -n '241,520p' ~/.agents/skills/gradle-best-practices/SKILL.md"
-command_execution  /bin/zsh -lc "rg --files -g 'settings.gradle' -g 'build.gradle' ..."
-```
-
-So to confirm a skill was actually used, capture the event stream and look for a shell command touching its `SKILL.md` path:
-
-```bash
-codex exec --json ... > run.jsonl
-grep -c 'gradle-best-practices/SKILL.md' run.jsonl
-```
-
-There is no tool-call name to match on, which matters if you are porting a skill-activation check from an agent that has one.
-
-## Troubleshooting
-
-**Two skills with the same name.** Route A writes to `~/.codex/skills/`, Route B to `~/.agents/skills/`. Codex reads both and will list `gradle-best-practices` twice, with different descriptions if the two copies are different versions. Delete whichever you do not want:
-
-```bash
-ls -d ~/.codex/skills/gradle-* ~/.agents/skills/gradle-* 2>/dev/null
-```
-
-**A skill you just installed is not being used.** It becomes available on the *next* turn. In `codex exec`, that means the next invocation — installing and using a skill in one non-interactive run does not work.
-
-**The skill loads but reports nothing.** Almost always network: it fetched no catalog. Confirm `sandbox_workspace_write.network_access=true` is set.
-
-**`./gradlew` fails with no JDK.** The sandboxed shell did not inherit your environment. Add `-c shell_environment_policy.inherit=all`, or set `org.gradle.java.home` in `gradle.properties`.
-
-**`Operation not permitted` on a file under `~/.gradle`.** The Gradle user home is not writable from the sandbox. Add `--add-dir ~/.gradle`.
-
-**Checking sandbox behaviour without burning a model run.** `codex sandbox` runs a single command under the same seatbelt policy — useful for proving a build works before you let an agent loose on it. Note it defaults to **read-only** regardless of your `config.toml`, so set the mode explicitly or every write silently fails:
-
-```bash
-codex sandbox -c sandbox_mode="workspace-write" \
-  -c 'sandbox_workspace_write.writable_roots=["'$HOME'/.gradle"]' \
-  -c sandbox_workspace_write.network_access=true \
-  -c shell_environment_policy.inherit=all \
-  ./gradlew build
-```
-
-**Isolating a run from your installed skills.** To test one skill with nothing else visible, point Codex at a throwaway home:
-
-```bash
-mkdir -p /tmp/ch/skills && ln -s ~/.codex/auth.json /tmp/ch/auth.json
-cp -R ~/.agents/skills/gradle-best-practices /tmp/ch/skills/
-HOME=/tmp/fakehome CODEX_HOME=/tmp/ch codex exec ...
-```
-
-Overriding `CODEX_HOME` alone is not enough — `~/.agents/skills/` is still read, which is why `HOME` is overridden too.
+[NOTES.md](NOTES.md) has the background: why each flag is mandatory (with the errors you get without it), what a run costs and how to keep it cheap, a representative run for calibration, how Codex actually loads a skill, and troubleshooting.
 
 ## Licence
 
