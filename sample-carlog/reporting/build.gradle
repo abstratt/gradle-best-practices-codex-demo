@@ -1,0 +1,20 @@
+plugins {
+    id 'java-library'
+}
+
+group = 'com.example'
+version = '1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    api 'org.apache.commons:commons-lang3:3.17.0'
+}

@@ -1,0 +1,144 @@
+import java.nio.file.Files
+
+plugins {
+    id 'java-library'
+    id 'groovy'
+}
+
+group = 'com.example'
+version = '1.0'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    api 'org.apache.commons:commons-lang3:3.17.0'
+    api project(':reporting')
+
+    testImplementation 'org.spockframework:spock-core:2.4-M6-groovy-4.0'
+    testImplementation 'org.apache.groovy:groovy:4.0.32'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher:1.12.2'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    testLogging {
+        events 'passed', 'failed', 'skipped'
+    }
+}
+
+// ---------------------------------------------------------------------
+// A tiny extension so the maintenance log location is configurable.
+// ---------------------------------------------------------------------
+
+abstract class CarMaintenanceExtension {
+    /** Name of the plain-text maintenance log, relative to the project directory. */
+    abstract Property<String> getLogFileName()
+}
+
+// Deliberately NOT named `carLog`: a local variable of that name would shadow the
+// `carLog { ... }` configuration block for the rest of this script.
+def carLogExtension = extensions.create('carLog', CarMaintenanceExtension)
+carLogExtension.logFileName.convention('car-maintenance-log.txt')
+
+def resolvedLogFileName = carLogExtension.logFileName.get()
+def maintenanceLogFile = layout.projectDirectory.file(resolvedLogFileName)
+
+// ---------------------------------------------------------------------
+// Custom task types. These are configuration-cache compatible: no Project
+// reference survives into the task action, and all state arrives through
+// annotated inputs.
+// ---------------------------------------------------------------------
+
+/** Prints every car mentioned in the maintenance log, with how many jobs each has had. */
+abstract class ListMaintainedCarsTask extends DefaultTask {
+
+    /**
+     * Declared as a file collection rather than a {@link RegularFileProperty} so the
+     * task still runs when the log has never been created.
+     */
+    @InputFiles
+    abstract ConfigurableFileCollection getMaintenanceLog()
+
+    @TaskAction
+    void listCars() {
+        def log = maintenanceLog.singleFile
+        if (!log.exists()) {
+            logger.lifecycle('No maintenance log found - no cars are being tracked yet.')
+            return
+        }
+
+        def jobsPerCar = new TreeMap<String, Integer>()
+        log.eachLine('UTF-8') { line ->
+            def trimmed = line.trim()
+            if (trimmed.isEmpty()) {
+                return
+            }
+            def car = trimmed.split(/\|/)[0]
+            jobsPerCar.merge(car, 1, Integer.&sum)
+        }
+
+        if (jobsPerCar.isEmpty()) {
+            logger.lifecycle('No maintenance log found - no cars are being tracked yet.')
+            return
+        }
+
+        logger.lifecycle("Tracking ${jobsPerCar.size()} car(s) in ${log.name}:")
+        jobsPerCar.each { car, jobs ->
+            logger.lifecycle("  - ${car} (${jobs} recorded job(s))")
+        }
+    }
+}
+
+/** Deletes the maintenance log so the next run starts from a clean slate. */
+abstract class ResetMaintenanceLogTask extends DefaultTask {
+
+    /** Not an @OutputFile: the point of this task is that the file stops existing. */
+    @Internal
+    abstract RegularFileProperty getMaintenanceLog()
+
+    @TaskAction
+    void reset() {
+        def log = maintenanceLog.get().asFile.toPath()
+        if (Files.deleteIfExists(log)) {
+            logger.lifecycle("Deleted maintenance log ${log.fileName}. Every car starts over.")
+        } else {
+            logger.lifecycle("No maintenance log at ${log.fileName} - nothing to reset.")
+        }
+    }
+}
+
+tasks.register('recordDemoMaintenance', JavaExec) {
+    group = 'car maintenance'
+    description = 'Runs a scripted maintenance session so the log has something in it.'
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.example.carlog.Demo'
+
+    // The demo writes through the library, so it needs to know the log location.
+    systemProperty 'carlog.file', resolvedLogFileName
+}
+
+tasks.register('listMaintainedCars', ListMaintainedCarsTask) {
+    group = 'car maintenance'
+    description = 'Lists every car tracked in the maintenance log.'
+    maintenanceLog.from(maintenanceLogFile)
+}
+
+tasks.register('resetMaintenanceLog', ResetMaintenanceLogTask) {
+    group = 'car maintenance'
+    description = 'Deletes the maintenance log, after printing what is about to be lost.'
+    maintenanceLog.set(maintenanceLogFile)
+
+    dependsOn 'listMaintainedCars'
+}
+
+tasks.getByName('listMaintainedCars').doLast {
+    logger.lifecycle('(Tip: ./gradlew resetMaintenanceLog clears the maintenance log.)')
+}

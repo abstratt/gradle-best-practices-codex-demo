@@ -1,0 +1,9 @@
+
+// Both projects build on a Java 21 toolchain. This resolver lets Gradle download a
+// JDK 21 when the machine does not already have one, so a fresh clone builds without
+// anyone having to install a JDK by hand.
+plugins {
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '1.0.0'
+}
+
+include ':reporting'
